@@ -1,4 +1,4 @@
 output ip {
-  value       = hcloud_server.node1.ipv4_address
-  description = "Ip of server node."
+  description = "IPs of the nodes."
+  value       = hcloud_server.cluster_nodes[*].ipv4_address
 }
