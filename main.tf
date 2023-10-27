@@ -10,10 +10,6 @@ provider "hcloud" {
   token = "${var.hcloud_token}"
 }
 
-locals {
-  nodes = var.masters + var.workers
-}
-
 resource "hcloud_ssh_key" "k8s" {
   name       = "k8s-instance-key"
   public_key = file("${var.public_key_file}")
@@ -98,9 +94,9 @@ resource "hcloud_placement_group" "cluster_nodes" {
   labels = var.labels
 }
 
-resource "hcloud_server" "cluster_nodes" {
-  count        = local.nodes
-  name         = format("node%s", count.index)
+resource "hcloud_server" "master_nodes" {
+  count        = var.masters
+  name         = format("master%s", count.index)
   image        = var.instance_image
   server_type  = var.instance_type
   ssh_keys     = [hcloud_ssh_key.k8s.id]
@@ -113,5 +109,38 @@ resource "hcloud_server" "cluster_nodes" {
     network_id = hcloud_network.k8s.id
   }
   placement_group_id = hcloud_placement_group.cluster_nodes.id
-  labels = var.labels
+  labels = merge(var.labels, {nodeType = "master"})
+}
+
+resource "hcloud_server" "worker_nodes" {
+  count        = var.workers
+  name         = format("worker%s", count.index)
+  image        = var.instance_image
+  server_type  = var.instance_type
+  ssh_keys     = [hcloud_ssh_key.k8s.id]
+  firewall_ids = [hcloud_firewall.allow_inbound.id]
+  public_net {
+    ipv4_enabled = true
+    ipv6_enabled = true
+  }
+  network {
+    network_id = hcloud_network.k8s.id
+  }
+  placement_group_id = hcloud_placement_group.cluster_nodes.id
+  labels = merge(var.labels, {nodeType = "worker"})
+}
+
+resource "hcloud_volume" "worker" {
+  count     = var.workers
+  name      = format("k8s-worker%s", count.index)
+  size      = var.worker_volume_size
+  location  = "hel1"
+  format    = "ext4"
+}
+
+resource "hcloud_volume_attachment" "worker" {
+  count     = var.workers
+  volume_id = hcloud_volume.worker[count.index].id
+  server_id = hcloud_server.worker_nodes[count.index].id
+  automount = true
 }
