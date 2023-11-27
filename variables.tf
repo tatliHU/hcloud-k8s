@@ -33,7 +33,7 @@ variable workers {
 
 variable instance_type {
   type        = string
-  default     = "cax11"
+  default     = "cax21"
 }
 
 variable instance_image {
@@ -45,7 +45,7 @@ variable "public_key_file" {
   description = "Path to a public key for ssh as a .pub."
   type        = string
   sensitive   = true
-  default     = "~/.ssh/id_rsa.pub"
+  default     = "~/.ssh/id_rsa.pub" #"C://Users/ifjto/.ssh/id_rsa.pub"
   validation {
     condition     = length(regexall(".pub", var.public_key_file)) > 0
     error_message = "Public key is empty string or contains invalid characters."

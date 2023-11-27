@@ -3,6 +3,9 @@ terraform {
     hcloud = {
       source = "hetznercloud/hcloud"
     }
+    time = {
+      source = "hashicorp/time"
+    }
   }
 }
 
@@ -85,6 +88,24 @@ resource "hcloud_firewall" "allow_inbound" {
       "::/0"
     ]
   }
+    rule {
+    direction = "in"
+    protocol  = "tcp"
+    port      = "6443"
+    source_ips = [
+      "0.0.0.0/0",
+      "::/0"
+    ]
+  }
+  rule {
+    direction = "out"
+    protocol  = "tcp"
+    port      = "6443"
+    destination_ips = [
+      "0.0.0.0/0",
+      "::/0"
+    ]
+  }
   labels = var.labels
 }
 
@@ -92,6 +113,14 @@ resource "hcloud_placement_group" "cluster_nodes" {
   name = "cluster-nodes"
   type = "spread"
   labels = var.labels
+}
+
+data "template_file" "init_masters" {
+  template = "${file("${path.module}/cloud-init.yaml.template")}"
+  vars = {
+    ssh_key = hcloud_ssh_key.k8s.public_key
+    command = "sh -"
+  }
 }
 
 resource "hcloud_server" "master_nodes" {
@@ -109,7 +138,34 @@ resource "hcloud_server" "master_nodes" {
     network_id = hcloud_network.k8s.id
   }
   placement_group_id = hcloud_placement_group.cluster_nodes.id
-  labels = merge(var.labels, {nodeType = "master"})
+  user_data          = data.template_file.init_masters.rendered
+  labels             = merge(var.labels, {nodeType = "master"})
+}
+
+resource "time_sleep" "wait_for_masters" {
+  create_duration = "30s"
+  depends_on      = [hcloud_server.master_nodes]
+}
+
+# fetch k3s token to connect more nodes to the cluster
+resource "null_resource" "k3s_token" {
+  provisioner "local-exec" {
+    command = "scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${hcloud_server.master_nodes[0].ipv4_address}:/var/lib/rancher/k3s/server/token ."
+  }
+  depends_on = [time_sleep.wait_for_masters]
+}
+
+data "local_file" "k3s_token" {
+  filename   = "${path.module}/token"
+  depends_on = [null_resource.k3s_token]
+}
+
+data "template_file" "init_workers" {
+  template = "${file("${path.module}/cloud-init.yaml.template")}"
+  vars = {
+    ssh_key = hcloud_ssh_key.k8s.public_key
+    command = "K3S_URL=https://${hcloud_server.master_nodes[0].ipv4_address}:6443 K3S_TOKEN=${trimspace(data.local_file.k3s_token.content)} sh -"
+  }
 }
 
 resource "hcloud_server" "worker_nodes" {
@@ -127,7 +183,8 @@ resource "hcloud_server" "worker_nodes" {
     network_id = hcloud_network.k8s.id
   }
   placement_group_id = hcloud_placement_group.cluster_nodes.id
-  labels = merge(var.labels, {nodeType = "worker"})
+  user_data          = data.template_file.init_workers.rendered
+  labels             = merge(var.labels, {nodeType = "worker"})
 }
 
 resource "hcloud_volume" "worker" {

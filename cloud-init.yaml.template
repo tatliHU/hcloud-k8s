@@ -1,0 +1,21 @@
+#cloud-config
+groups:
+  - ubuntu: [root,sys]
+  - hashicorp
+
+users:
+  - default
+  - name: clusteradmin
+    gecos: clusteradmin
+    shell: /bin/bash
+    primary_group: hashicorp
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
+    lock_passwd: false
+    ssh_authorized_keys:
+      - ${ssh_key}
+
+runcmd:
+  - sudo su clusteradmin
+  - cd /home/clusteradmin
+  - curl -sfL https://get.k3s.io | ${command}
